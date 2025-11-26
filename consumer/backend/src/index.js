@@ -32,10 +32,15 @@ const mediaProto = grpc.loadPackageDefinition(packageDefinition).media;
 
 const videos = new Map(); // videoId -> { id, filename, path, previewPath, createdAt }
 
-// simple in-memory queue controls
+// simple in-memory queue controls for uploads
 const Q_MAX = Number(process.env.CONSUMER_Q_MAX || 10);
 let queueLength = 0;
 let totalDropped = 0;
+
+// processing job queue and workers (for c)
+const CONSUMER_WORKERS = Number(process.env.CONSUMER_WORKERS || 1);
+const processingQueue = [];
+let activeWorkers = 0;
 
 function broadcast(wsServer, type, payload) {
   wsServer.clients.forEach((client) => {
@@ -43,6 +48,31 @@ function broadcast(wsServer, type, payload) {
       client.send(JSON.stringify({ type, payload }));
     }
   });
+}
+
+function enqueueProcessingJob(videoId) {
+  processingQueue.push({ videoId });
+  runWorkersIfNeeded();
+}
+
+function runWorkersIfNeeded() {
+  while (activeWorkers < CONSUMER_WORKERS && processingQueue.length > 0) {
+    const job = processingQueue.shift();
+    activeWorkers += 1;
+
+    // simple async worker
+    Promise.resolve()
+      .then(() => {
+        generatePreviewIfNeeded(job.videoId);
+      })
+      .catch((err) => {
+        console.error('Processing job error for video', job.videoId, err);
+      })
+      .finally(() => {
+        activeWorkers -= 1;
+        runWorkersIfNeeded();
+      });
+  }
 }
 
 function generatePreviewIfNeeded(videoId) {
@@ -141,7 +171,7 @@ function createGrpcServer(wsServer) {
             writeStream.end();
           }
           if (videoId) {
-            generatePreviewIfNeeded(videoId);
+            enqueueProcessingJob(videoId);
           }
         }
       });
