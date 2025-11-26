@@ -1,0 +1,48 @@
+version: "3.9"
+
+services:
+  consumer-backend:
+    build:
+      context: .
+      dockerfile: consumer/backend/Dockerfile
+    container_name: consumer-backend
+    ports:
+      - "4000:4000"   # HTTP / WebSocket
+      - "50051:50051" # gRPC
+    environment:
+      NODE_ENV: production
+      CONSUMER_Q_MAX: ${Q:-10}       # q (max concurrent uploads)
+      CONSUMER_WORKERS: ${C:-2}      # c (processing workers)
+      CONSUMER_UPLOAD_DIR: /app/uploads
+      FFMPEG_PATH: ffmpeg
+    volumes:
+      - consumer_uploads:/app/uploads
+
+  consumer-frontend:
+    build:
+      context: .
+      dockerfile: consumer/frontend/Dockerfile
+    container_name: consumer-frontend
+    depends_on:
+      - consumer-backend
+    ports:
+      - "5173:80"  # open http://localhost:5173
+
+  producer:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    container_name: producer
+    depends_on:
+      - consumer-backend
+    environment:
+      NODE_ENV: production
+      CONSUMER_ADDR: consumer-backend:50051
+      PRODUCER_CONCURRENCY: ${P:-2}  # p (producer concurrency within this instance)
+      Q_HINT: ${Q:-10}
+      PRODUCER_VIDEOS_DIR: /app/videos
+    volumes:
+      - ./producer_videos:/app/videos
+
+volumes:
+  consumer_uploads:

@@ -13,7 +13,7 @@ import { WebSocketServer } from 'ws';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PROTO_PATH = path.join(__dirname, '..', '..', '..', 'proto', 'media.proto');
+const PROTO_PATH = path.join(__dirname, '..', 'proto', 'media.proto');
 const UPLOAD_DIR = process.env.CONSUMER_UPLOAD_DIR || path.join(__dirname, '..', 'uploads');
 const PREVIEW_DIR = path.join(UPLOAD_DIR, 'previews');
 

@@ -8,7 +8,7 @@ import protoLoader from '@grpc/proto-loader';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PROTO_PATH = path.join(__dirname, '..', '..', 'proto', 'media.proto');
+const PROTO_PATH = path.join(__dirname, '..', 'proto', 'media.proto');
 const CONSUMER_ADDR = process.env.CONSUMER_ADDR || 'localhost:50051';
 const Q_HINT = Number(process.env.Q_HINT || 10);
 
