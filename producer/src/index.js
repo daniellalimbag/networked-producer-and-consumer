@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 const VIDEOS_DIR = process.env.PRODUCER_VIDEOS_DIR || path.join(__dirname, '..', 'videos');
 const CONCURRENCY = Number(process.env.PRODUCER_CONCURRENCY || 2);
+const Q_HINT = Number(process.env.Q_HINT || 10);
 
 function getVideoFiles() {
   if (!fs.existsSync(VIDEOS_DIR)) {
@@ -41,6 +42,7 @@ function runWorker(videoPath) {
 }
 
 async function main() {
+  console.log(`Producer starting with concurrency=${CONCURRENCY} (p) and Q_HINT=${Q_HINT}`);
   const files = getVideoFiles();
   if (files.length === 0) {
     console.log('No video files found to upload.');

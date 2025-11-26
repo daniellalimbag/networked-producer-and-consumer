@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 const PROTO_PATH = path.join(__dirname, '..', '..', 'proto', 'media.proto');
 const CONSUMER_ADDR = process.env.CONSUMER_ADDR || 'localhost:50051';
+const Q_HINT = Number(process.env.Q_HINT || 10);
 
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   keepCase: true,
@@ -36,7 +37,15 @@ function uploadVideo(videoPath) {
       if (err) {
         return reject(err);
       }
-      log(`Upload finished for ${path.basename(videoPath)}: ${response.message}`);
+      if (response && response.success === false && response.message === 'queue full') {
+        log(
+          `Queue full at consumer for ${path.basename(
+            videoPath,
+          )} (Q_HINT=${Q_HINT}). Dropping this upload.`,
+        );
+        return resolve();
+      }
+      log(`Upload finished for ${path.basename(videoPath)}: ${response?.message ?? 'ok'}`);
       resolve();
     });
 
