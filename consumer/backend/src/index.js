@@ -31,6 +31,11 @@ const mediaProto = grpc.loadPackageDefinition(packageDefinition).media;
 
 const videos = new Map(); // videoId -> { id, filename, path, previewPath, createdAt }
 
+// simple in-memory queue controls
+const Q_MAX = Number(process.env.CONSUMER_Q_MAX || 10);
+let queueLength = 0;
+let totalDropped = 0;
+
 function broadcast(wsServer, type, payload) {
   wsServer.clients.forEach((client) => {
     if (client.readyState === 1) {
@@ -44,6 +49,15 @@ function createGrpcServer(wsServer) {
 
   server.addService(mediaProto.MediaUpload.service, {
     Upload: (call, callback) => {
+      if (queueLength >= Q_MAX) {
+        totalDropped += 1;
+        // drain incoming data without processing to avoid backpressure on the TCP stream
+        call.on('data', () => {});
+        call.on('end', () => {});
+        return callback(null, { success: false, message: 'queue full' });
+      }
+
+      queueLength += 1;
       let videoId = null;
       let filename = null;
       let writeStream = null;
@@ -64,7 +78,7 @@ function createGrpcServer(wsServer) {
           };
           videos.set(videoId, videoMeta);
           broadcast(wsServer, 'video_uploaded', videoMeta);
-          // Stub: here is where FFmpeg would generate a 10s preview and update previewPath.
+          // stub: here is where FFmpeg would generate a 10s preview and update previewPath.
         }
 
         if (chunk.data && chunk.data.length > 0) {
@@ -79,11 +93,13 @@ function createGrpcServer(wsServer) {
       });
 
       call.on('end', () => {
+        if (queueLength > 0) queueLength -= 1;
         callback(null, { success: true, message: 'Upload received' });
       });
 
       call.on('error', (err) => {
         console.error('gRPC upload error', err);
+        if (queueLength > 0) queueLength -= 1;
       });
     },
   });
@@ -95,11 +111,16 @@ function createHttpAndWsServer() {
   const app = express();
   app.use(cors());
 
-  // Simple in-memory queue stub (for extension later)
-  const queue = [];
-
   app.get('/', (req, res) => {
     res.json({ status: 'ok', service: 'media-consumer-backend' });
+  });
+
+  app.get('/api/metrics', (req, res) => {
+    res.json({
+      queueLength,
+      queueMax: Q_MAX,
+      totalDropped,
+    });
   });
 
   app.get('/api/videos', (req, res) => {
@@ -116,7 +137,7 @@ function createHttpAndWsServer() {
   app.get('/api/videos/:id/preview', (req, res) => {
     const video = videos.get(req.params.id);
     if (!video) return res.status(404).json({ error: 'Not found' });
-    // For now, just serve the full video as a stand-in for the preview.
+    // for now, just serve the full video as a stand-in for the preview.
     res.sendFile(path.resolve(video.path));
   });
 
