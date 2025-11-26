@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
@@ -40,6 +41,56 @@ function broadcast(wsServer, type, payload) {
   wsServer.clients.forEach((client) => {
     if (client.readyState === 1) {
       client.send(JSON.stringify({ type, payload }));
+    }
+  });
+}
+
+function generatePreviewIfNeeded(videoId) {
+  const video = videos.get(videoId);
+  if (!video) return;
+
+  // if previewPath already set and file exists, do nothing
+  if (video.previewPath && fs.existsSync(video.previewPath)) {
+    return;
+  }
+
+  const inputPath = video.path;
+  const previewFileName = `${video.id}-preview.mp4`;
+  const outputPath = path.join(PREVIEW_DIR, previewFileName);
+
+  // if a preview file already exists on disk, just record it
+  if (fs.existsSync(outputPath)) {
+    video.previewPath = outputPath;
+    videos.set(video.id, video);
+    return;
+  }
+
+  const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+
+  const args = [
+    '-y',
+    '-ss', '0',
+    '-i', inputPath,
+    '-t', '10',
+    '-c:v', 'libx264',
+    '-c:a', 'aac',
+    '-preset', 'veryfast',
+    '-movflags', '+faststart',
+    outputPath,
+  ];
+
+  const proc = spawn(ffmpegPath, args, { stdio: 'ignore' });
+
+  proc.on('error', (err) => {
+    console.error(`ffmpeg spawn error for ${video.id}:`, err.message);
+  });
+
+  proc.on('exit', (code) => {
+    if (code === 0) {
+      video.previewPath = outputPath;
+      videos.set(video.id, video);
+    } else {
+      console.error(`ffmpeg preview generation failed for ${video.id} with code ${code}`);
     }
   });
 }
@@ -89,6 +140,9 @@ function createGrpcServer(wsServer) {
           if (writeStream) {
             writeStream.end();
           }
+          if (videoId) {
+            generatePreviewIfNeeded(videoId);
+          }
         }
       });
 
@@ -137,8 +191,10 @@ function createHttpAndWsServer() {
   app.get('/api/videos/:id/preview', (req, res) => {
     const video = videos.get(req.params.id);
     if (!video) return res.status(404).json({ error: 'Not found' });
-    // for now, just serve the full video as a stand-in for the preview.
-    res.sendFile(path.resolve(video.path));
+    const previewPath = video.previewPath && fs.existsSync(video.previewPath)
+      ? video.previewPath
+      : video.path;
+    res.sendFile(path.resolve(previewPath));
   });
 
   const server = http.createServer(app);
