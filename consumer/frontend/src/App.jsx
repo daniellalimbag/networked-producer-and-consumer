@@ -57,7 +57,7 @@ export default function App() {
                   cursor: 'pointer',
                 }}
                 onMouseEnter={() => setHoveredId(v.id)}
-                onMouseLeave={() => setHoveredId((id) => (id === v.id ? null : id))}
+                onMouseLeave={() => setHoveredId(null)}
                 onClick={() => setSelectedId(v.id)}
               >
                 <div><strong>{v.filename}</strong></div>
@@ -71,7 +71,6 @@ export default function App() {
           <h2>Hover Preview (10s stub)</h2>
           {hoveredVideo ? (
             <video
-              key={hoveredVideo.id}
               src={`${API_BASE}/api/videos/${hoveredVideo.id}/preview`}
               style={{ width: '100%', maxHeight: '300px', background: '#000' }}
               autoPlay
@@ -83,10 +82,8 @@ export default function App() {
             <p>Hover over a video to preview.</p>
           )}
 
-          <h2 style={{ marginTop: '1rem' }}>Selected Video</h2>
           {selectedVideo ? (
             <video
-              key={selectedVideo.id}
               src={`${API_BASE}/api/videos/${selectedVideo.id}/full`}
               style={{ width: '100%', maxHeight: '300px', background: '#000' }}
               controls
