@@ -61,7 +61,9 @@ async function main() {
     const file = queue.shift();
     const p = runWorker(file)
       .catch((err) => {
-        console.error('Worker failed for', file, err.message);
+        console.error(`Worker upload failed for ${file}`);
+        console.error(`Error: ${err.message}`);
+        console.error(`Stack: ${err.stack}`);
       })
       .finally(() => {
         running.delete(p);
