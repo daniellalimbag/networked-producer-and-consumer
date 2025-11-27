@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { workerData, parentPort } from 'node:worker_threads';
 import grpc from '@grpc/grpc-js';
 import protoLoader from '@grpc/proto-loader';
+import { logInfo, logError } from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +13,13 @@ const PROTO_PATH = path.join(__dirname, '..', 'proto', 'media.proto');
 const CONSUMER_ADDR = process.env.CONSUMER_ADDR || 'localhost:50051';
 const Q_HINT = Number(process.env.Q_HINT || 10);
 const MAX_RETRIES = 3;
+
+const metrics = {
+  uploadsAttempted: 0,
+  uploadsSuccessful: 0,
+  retriesCount: 0,
+  errorsCount: 0
+};
 
 const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
   keepCase: true,
@@ -23,14 +31,6 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 
 const mediaProto = grpc.loadPackageDefinition(packageDefinition).media;
 
-function log(text) {
-  if (parentPort) parentPort.postMessage({ type: 'log', text });
-}
-
-function error(text) {
-  if (parentPort) parentPort.postMessage({ type: 'error', text });
-}
-
 function isTransientError(err) {
   return [
     grpc.status.UNAVAILABLE,
@@ -39,16 +39,23 @@ function isTransientError(err) {
 }
 
 async function uploadWithRetries(videoPath, attempt = 1) {
+  metrics.uploadsAttempted++;
+
   try {
-    log(`Uploading ${path.basename(videoPath)} (Attempt ${attempt}/${MAX_RETRIES})`);
+    logInfo("UPLOAD", `Uploading ${path.basename(videoPath)} (Attempt ${attempt}/${MAX_RETRIES})`);
     await uploadVideo(videoPath);
-    log(`Upload succeeded for ${path.basename(videoPath)} on attempt ${attempt}`);
+    metrics.uploadsSuccessful++;
+    logInfo("UPLOAD", `Upload succeeded for ${path.basename(videoPath)} on attempt ${attempt}`);
   } catch (err) {
+    metrics.errorsCount++;
+
     if (isTransientError(err) && attempt < MAX_RETRIES) {
-      log(`Transient gRPC error during upload: ${err.message}. Retrying...`);
+      metrics.retriesCount++;
+      logInfo("RETRY", `Transient gRPC error: ${err.message}. Retrying...`);
       return uploadWithRetries(videoPath, attempt + 1);
     }
-    error(`Upload failed permanently after ${attempt} attempt(s): ${err.message}`);
+
+    logError("UPLOAD", `Upload failed permanently after ${attempt} attempt(s): ${err.message}`);
     throw err;
   }
 }
@@ -56,24 +63,20 @@ async function uploadWithRetries(videoPath, attempt = 1) {
 function uploadVideo(videoPath) {
   return new Promise((resolve, reject) => {
     const client = new mediaProto.MediaUpload(CONSUMER_ADDR, grpc.credentials.createInsecure());
-
     let bytesSent = 0;
 
     const call = client.Upload((err, response) => {
       if (err) {
-        error(`gRPC Upload failed: ${err.message}`);
+        logError("RPC", `gRPC Upload failed: ${err.message}`);
         return reject(err);
       }
 
       if (response?.success === false && response.message === 'queue full') {
-        log(`Queue full at consumer for ${path.basename(videoPath)} (Q_HINT=${Q_HINT}) — Dropped.`);
+        logInfo("QUEUE", `Queue full for ${path.basename(videoPath)} (Q_HINT=${Q_HINT}) — Dropped`);
         return resolve();
       }
 
-      log(
-        `Upload finished for ${path.basename(videoPath)}: ${response?.message ?? 'ok'} ` +
-        `(${bytesSent} bytes sent)`
-      );
+      logInfo("UPLOAD", `Finished upload ${path.basename(videoPath)} (${bytesSent} bytes sent)`);
       resolve();
     });
 
@@ -99,12 +102,14 @@ function uploadVideo(videoPath) {
       });
 
       readStream.on('error', (err) => {
-        error(`Read error for ${videoPath}: ${err.message} (Sent ${bytesSent} bytes)`);
+        metrics.errorsCount++;
+        logError("STREAM", `Read error ${filename}: ${err.message} (Sent ${bytesSent} bytes)`);
         call.end();
         reject(err);
       });
     } catch (streamErr) {
-      error(`Failed to start stream for ${videoPath}: ${streamErr.message}`);
+      metrics.errorsCount++;
+      logError("STREAM", `Failed to start read stream: ${streamErr.message}`);
       reject(streamErr);
     }
   });
@@ -113,8 +118,13 @@ function uploadVideo(videoPath) {
 (async () => {
   try {
     await uploadWithRetries(workerData.videoPath);
+
+    logInfo("SUMMARY", `Final status for ${path.basename(workerData.videoPath)} processed.`);
+    logInfo("SUMMARY", `Metrics → Attempts: ${metrics.uploadsAttempted}, Success: ${metrics.uploadsSuccessful}, Retries: ${metrics.retriesCount}, Errors: ${metrics.errorsCount}`);
+
     if (parentPort) parentPort.close();
   } catch (err) {
+    logError("FATAL", `Worker exiting due to error: ${err.message}`);
     process.exit(1);
   }
 })();

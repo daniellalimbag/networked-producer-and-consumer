@@ -37,6 +37,13 @@ const Q_MAX = Number(process.env.CONSUMER_Q_MAX || 10);
 let queueLength = 0;
 let totalDropped = 0;
 
+let metrics = {
+  videosReceived: 0,
+  videosFailed: 0,
+  previewGenerated: 0,
+  previewFailed: 0,
+};
+
 // processing job queue and workers (for c)
 const CONSUMER_WORKERS = Number(process.env.CONSUMER_WORKERS || 1);
 const processingQueue = [];
@@ -117,9 +124,11 @@ function generatePreviewIfNeeded(videoId) {
 
   proc.on('exit', (code) => {
     if (code === 0) {
+      metrics.previewGenerated++;
       video.previewPath = outputPath;
       videos.set(video.id, video);
     } else {
+      metrics.previewFailed++;
       console.error(`ffmpeg preview generation failed for ${video.id} with code ${code}`);
     }
   });
@@ -132,6 +141,7 @@ function createGrpcServer(wsServer) {
     Upload: (call, callback) => {
       if (queueLength >= Q_MAX) {
         totalDropped += 1;
+        metrics.videosFailed++;
         // drain incoming data without processing to avoid backpressure on the TCP stream
         call.on('data', () => {});
         call.on('end', () => {});
@@ -142,6 +152,8 @@ function createGrpcServer(wsServer) {
       let videoId = null;
       let filename = null;
       let writeStream = null;
+
+      metrics.videosReceived++;
 
       call.on('data', (chunk) => {
         if (!videoId) videoId = chunk.video_id;
@@ -204,8 +216,13 @@ function createHttpAndWsServer() {
       queueLength,
       queueMax: Q_MAX,
       totalDropped,
+      videosReceived: metrics.videosReceived,
+      videosFailed: metrics.videosFailed,
+      previewGenerated: metrics.previewGenerated,
+      previewFailed: metrics.previewFailed,
     });
   });
+
 
   app.get('/api/videos', (req, res) => {
     const list = Array.from(videos.values()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
