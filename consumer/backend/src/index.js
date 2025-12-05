@@ -58,8 +58,15 @@ function broadcast(wsServer, type, payload) {
 }
 
 function enqueueProcessingJob(videoId) {
+  if (processingQueue.length >= Q_MAX) {
+    console.warn('Processing queue full, dropping job for video', videoId);
+    metrics.totalDropped++;
+    return false;
+  }
   processingQueue.push({ videoId });
+  console.log(`Job enqueued for video ${videoId}, queue length:`, processingQueue.length);
   runWorkersIfNeeded();
+  return true;
 }
 
 function runWorkersIfNeeded() {
@@ -70,7 +77,13 @@ function runWorkersIfNeeded() {
     // simple async worker
     Promise.resolve()
       .then(() => {
+        console.log(`Worker started processing video ${job.videoId}. Active workers: ${activeWorkers}`);
         generatePreviewIfNeeded(job.videoId);
+        
+
+        if (process.env.ENABLE_COMPRESSION === 'true'){
+          compressVideo(job.videoId);
+        }
       })
       .catch((err) => {
         console.error('Processing job error for video', job.videoId, err);
@@ -127,11 +140,51 @@ function generatePreviewIfNeeded(videoId) {
       metrics.previewGenerated++;
       video.previewPath = outputPath;
       videos.set(video.id, video);
+      console.log('Preview generated for video', video.id);
     } else {
       metrics.previewFailed++;
       console.error(`ffmpeg preview generation failed for ${video.id} with code ${code}`);
     }
   });
+}
+
+function compressVideo(videoId) {
+  const video = videos.get(videoId);
+  if (!video) return;
+  // stub: here is where FFmpeg would compress the video
+  const inputPath = video.path;
+  const outputPath = path.join(UPLOAD_DIR, `${video.id}-compressed.mp4`)
+  console.log(`Compressing video ${video.id} from ${inputPath} to ${outputPath}`);
+
+  if (fs.existsSync(outputPath)) {
+    video.compressedPath = outputPath;
+    videos.set(video.id, video);
+    console.log('Compressed video already exists for', video.id);
+    return;
+  }
+
+  const ffmpegPath = process.env.FFMPEG_PATH || 'ffmpeg';
+  const args = [
+    '-y',
+    '-i', inputPath,
+    '-c:v', 'libx264',
+    '-preset', 'slow',
+    '-b:v', '1000k',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    outputPath,
+  ];
+
+  const proc = spawn(ffmpegPath, args, { stdio: 'ignore' });
+  proc.on('exit', (code) => {
+    if (code === 0) {
+      video.compressedPath = outputPath;
+      videos.set(video.id, video);
+      console.log('Video compressed for', video.id);
+    } else {
+      console.error(`ffmpeg compression failed for ${video.id} with code ${code}`);
+    }
+    });
 }
 
 function createGrpcServer(wsServer) {
@@ -276,6 +329,10 @@ function main() {
   httpServer.listen(HTTP_PORT, () => {
     console.log(`HTTP/WebSocket server listening on http://localhost:${HTTP_PORT}`);
   });
+
+  for (let i=0; i < CONSUMER_WORKERS; i++) {
+    runWorkersIfNeeded();
+  }
 }
 
 main();
