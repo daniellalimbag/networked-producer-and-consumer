@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package media;
+
+service MediaUpload {
+  rpc Upload(stream VideoChunk) returns (UploadStatus);
+}
+
+message VideoChunk {
+  string video_id = 1;
+  string filename = 2;
+  bytes data = 3;
+  bool is_last = 4;
+}
+
+message UploadStatus {
+  bool success = 1;
+  string message = 2;
+}
