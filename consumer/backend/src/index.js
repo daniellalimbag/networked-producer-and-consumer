@@ -80,10 +80,7 @@ function runWorkersIfNeeded() {
         console.log(`Worker started processing video ${job.videoId}. Active workers: ${activeWorkers}`);
         generatePreviewIfNeeded(job.videoId);
         
-
-        if (process.env.ENABLE_COMPRESSION === 'true'){
           compressVideo(job.videoId);
-        }
       })
       .catch((err) => {
         console.error('Processing job error for video', job.videoId, err);
