@@ -13,6 +13,27 @@ import { WebSocketServer } from 'ws';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function parseArgs(argv) {
+  const args = { c: undefined, q: undefined };
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--c' || a === '-c') {
+      const v = argv[i + 1];
+      if (!v) throw new Error('Missing value for --c');
+      args.c = Number(v);
+      i++;
+    } else if (a === '--q' || a === '-q') {
+      const v = argv[i + 1];
+      if (!v) throw new Error('Missing value for --q');
+      args.q = Number(v);
+      i++;
+    }
+  }
+  return args;
+}
+
+const { c: ARG_C, q: ARG_Q } = parseArgs(process.argv);
+
 const PROTO_PATH = path.join(__dirname, '..', 'proto', 'media.proto');
 const UPLOAD_DIR = process.env.CONSUMER_UPLOAD_DIR || path.join(__dirname, '..', 'uploads');
 const PREVIEW_DIR = path.join(UPLOAD_DIR, 'previews');
@@ -33,7 +54,9 @@ const mediaProto = grpc.loadPackageDefinition(packageDefinition).media;
 const videos = new Map(); // videoId -> { id, filename, path, previewPath, createdAt }
 
 // simple in-memory queue controls for uploads
-const Q_MAX = Number(process.env.CONSUMER_Q_MAX || 10);
+const ENV_Q_MAX = Number(process.env.CONSUMER_Q_MAX || 10);
+let Q_MAX = Number.isFinite(ARG_Q) ? ARG_Q : ENV_Q_MAX;
+if (!Number.isFinite(Q_MAX) || Q_MAX < 1) Q_MAX = 1;
 let queueLength = 0;
 let totalDropped = 0;
 
@@ -45,7 +68,9 @@ let metrics = {
 };
 
 // processing job queue and workers (for c)
-const CONSUMER_WORKERS = Number(process.env.CONSUMER_WORKERS || 1);
+const ENV_CONSUMER_WORKERS = Number(process.env.CONSUMER_WORKERS || 1);
+let CONSUMER_WORKERS = Number.isFinite(ARG_C) ? ARG_C : ENV_CONSUMER_WORKERS;
+if (!Number.isFinite(CONSUMER_WORKERS) || CONSUMER_WORKERS < 1) CONSUMER_WORKERS = 1;
 const processingQueue = [];
 let activeWorkers = 0;
 
