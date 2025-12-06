@@ -1,9 +1,6 @@
 # Node Producer–Consumer Local Starter
 
 so we have: **Node.js producer**, **Node.js consumer backend**, and **React (Vite) consumer frontend** locally for the media upload producer–consumer exercise.
-
-rn this setup is meant to run on a single machine but is structured so the producer and consumer can later be split into separate VMs or containers (i hope)
-
 ---
 
 ## 1. Architecture Overview
