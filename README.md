@@ -1,47 +1,13 @@
-# Node Producer–Consumer Local Starter
+# Networked Producer and Consumer (STIDSCM P3)
 
-so we have: **Node.js producer**, **Node.js consumer backend**, and **React (Vite) consumer frontend** locally for the media upload producer–consumer exercise.
+## Authors
+- GOMEZ, Dominic Joel
+- LIMBAG, Daniella Franxene
+- REYES, Ma. Julianna Re-an
+- SANTOS, Montgomery Joseph
 ---
 
-## 1. Architecture Overview
-
-- **Shared gRPC contract** (`proto/media.proto`)
-  - `service MediaUpload { rpc Upload(stream VideoChunk) returns (UploadStatus); }`
-  - `VideoChunk { video_id, filename, bytes data, bool is_last }`
-  - `UploadStatus { success, message }`
-
-- **Producer** (`producer/`)
-  - Node.js 18, `@grpc/grpc-js`, `@grpc/proto-loader`.
-  - Reads video files from `producer/videos/`.
-  - Uses worker threads to upload multiple videos concurrently.
-  - Streams each file to the consumer via gRPC.
-
-- **Consumer backend** (`consumer/backend/`)
-  - Node.js 18, gRPC server + Express REST + WebSocket (`ws`).
-  - Saves uploaded videos into `consumer/backend/uploads/` (git-ignored).
-  - In-memory store of uploaded videos.
-  - REST API used by the frontend:
-    - `GET /api/videos` – list all videos.
-    - `GET /api/videos/:id/preview` – preview video (currently same as full video, preview stub).
-    - `GET /api/videos/:id/full` – full video.
-  - WebSocket server:
-    - Broadcasts `video_uploaded` when a new video is stored.
-  - Simple health check:
-    - `GET /` → `{ status: "ok", service: "media-consumer-backend" }`.
-
-- **Consumer frontend** (`consumer/frontend/`)
-  - React 18 + Vite.
-  - Talks only to the consumer backend:
-    - REST → listing and loading videos.
-    - WebSocket → real-time updates when new videos arrive.
-  - UI behavior:
-    - Left pane: list of uploaded videos.
-    - Hover on a video → auto-play preview (currently full file, stub for 10s preview).
-    - Click on a video → full player with controls.
-
----
-
-## 2. Prerequisites
+## 1. Prerequisites
 
 - **Node.js 18.x** installed.
   - Check with: `node -v`
@@ -56,11 +22,11 @@ Networked-Producer-and-Consumer/
 
 ---
 
-## 3. First-Time Setup (after cloning)
+## 2. First-Time Setup (after cloning)
 
 From the repo root.
 
-### 3.1 Install dependencies
+### 2.1 Install dependencies
 
 ```bash
 # Producer
@@ -78,7 +44,7 @@ npm install
 
 You only need to do this once per clone (or whenever `package.json` changes).
 
-### 3.2 Prepare local video folder for producer
+### 2.2 Prepare local video folder for producer
 
 From the repo root:
 
@@ -96,11 +62,11 @@ You do **not** need to create `consumer/backend/uploads/` manually – the backe
 
 ---
 
-## 4. Running the System Locally
+## 3. Running the System Locally
 
 Use three terminals: one for the backend, one for the frontend, and one for the producer.
 
-### 4.1 Start the consumer backend (gRPC + REST + WebSocket)
+### 3.1 Start the consumer backend (gRPC + REST + WebSocket)
 
 From repo root:
 
@@ -128,7 +94,7 @@ Health-check in the browser:
 { "status": "ok", "service": "media-consumer-backend" }
 ```
 
-### 4.2 Start the consumer frontend (React + Vite)
+### 3.2 Start the consumer frontend (React + Vite)
 
 In a second terminal, from repo root:
 
@@ -150,7 +116,7 @@ http://localhost:5173/
 
 You should see the Media Consumer UI. Initially, there will be no videos listed.
 
-### 4.3 Start the producer (gRPC client with worker threads)
+### 3.3 Start the producer (gRPC client with worker threads)
 
 In a third terminal, from repo root:
 
@@ -165,27 +131,9 @@ cd producer
 npm start
 ```
 
-Behavior:
-
-- The producer scans `producer/videos/` for files.
-- For each file, a worker-thread process streams the file via gRPC to the consumer backend.
-- The consumer backend:
-  - Writes the video to `consumer/backend/uploads/<videoId>-<filename>`.
-  - Tracks metadata (id, filename, path, createdAt) in an in-memory map.
-  - Broadcasts a `video_uploaded` message over WebSocket.
-
-Frontend behavior:
-
-- The UI automatically loads videos from `GET /api/videos` on startup.
-- When the backend broadcasts `video_uploaded`, the frontend prepends the new video to the list.
-- **Hover** over a video in the list:
-  - The right-side preview player calls `GET /api/videos/:id/preview` and auto-plays it (mute loop).
-- **Click** a video:
-  - The selected player calls `GET /api/videos/:id/full` and shows it with controls.
-
 ---
 
-## 5. Configuration Summary
+## 4. Configuration Summary
 
 All configuration is environment-variable driven with safe defaults.
 
