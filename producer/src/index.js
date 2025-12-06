@@ -86,7 +86,17 @@ async function main() {
   let p = Number.isFinite(argP) ? argP : ENV_P;
   if (!Number.isFinite(p) || p < 1) p = 1;
 
-  let dirs = Array.isArray(argDirs) && argDirs.length > 0 ? argDirs : [DEFAULT_VIDEOS_DIR];
+  // Determine directories from CLI or environment
+  let envDirs = [];
+  if (process.env.VIDEOS_DIRS) {
+    envDirs = process.env.VIDEOS_DIRS.split(',').map((s) => s.trim()).filter(Boolean);
+  } else if (process.env.PRODUCER_VIDEOS_DIRS) {
+    envDirs = process.env.PRODUCER_VIDEOS_DIRS.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+
+  let dirs = Array.isArray(argDirs) && argDirs.length > 0
+    ? argDirs
+    : (envDirs.length > 0 ? envDirs : [DEFAULT_VIDEOS_DIR]);
 
   // Enforce separate folder per thread: we will use at most one dir per thread
   if (dirs.length < p) {

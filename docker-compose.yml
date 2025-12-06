@@ -40,6 +40,7 @@ services:
       CONSUMER_ADDR: consumer-backend:50051
       PRODUCER_CONCURRENCY: ${P:-2}  # p (producer concurrency within this instance)
       Q_HINT: ${Q:-10}
+      PRODUCER_VIDEOS_DIRS: ${VIDEOS_DIRS:-}  # optional CSV of dirs inside container, e.g. /app/videos/dir1,/app/videos/dir2
       PRODUCER_VIDEOS_DIR: /app/videos
     volumes:
       - ./producer_videos:/app/videos

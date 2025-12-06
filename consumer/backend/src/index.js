@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 
 import express from 'express';
 import cors from 'cors';
@@ -52,6 +53,7 @@ const packageDefinition = protoLoader.loadSync(PROTO_PATH, {
 const mediaProto = grpc.loadPackageDefinition(packageDefinition).media;
 
 const videos = new Map(); // videoId -> { id, filename, path, previewPath, createdAt }
+const knownHashes = new Map(); // sha256 -> { id, filename }
 
 // simple in-memory queue controls for uploads
 const ENV_Q_MAX = Number(process.env.CONSUMER_Q_MAX || 10);
@@ -65,6 +67,7 @@ let metrics = {
   videosFailed: 0,
   previewGenerated: 0,
   previewFailed: 0,
+  duplicatesDetected: 0,
 };
 
 // processing job queue and workers (for c)
@@ -85,7 +88,7 @@ function broadcast(wsServer, type, payload) {
 function enqueueProcessingJob(videoId) {
   if (processingQueue.length >= Q_MAX) {
     console.warn('Processing queue full, dropping job for video', videoId);
-    metrics.totalDropped++;
+    totalDropped++;
     return false;
   }
   processingQueue.push({ videoId });
@@ -214,7 +217,8 @@ function createGrpcServer(wsServer) {
 
   server.addService(mediaProto.MediaUpload.service, {
     Upload: (call, callback) => {
-      if (queueLength >= Q_MAX) {
+      // Leaky-bucket admission: consider both in-flight uploads and processing backlog
+      if ((queueLength + processingQueue.length) >= Q_MAX) {
         totalDropped += 1;
         metrics.videosFailed++;
         // drain incoming data without processing to avoid backpressure on the TCP stream
@@ -227,6 +231,9 @@ function createGrpcServer(wsServer) {
       let videoId = null;
       let filename = null;
       let writeStream = null;
+      let hasher = crypto.createHash('sha256');
+      let filePath = null;
+      let videoMeta = null;
 
       metrics.videosReceived++;
 
@@ -235,36 +242,57 @@ function createGrpcServer(wsServer) {
         if (!filename) filename = chunk.filename;
 
         if (!writeStream) {
-          const filePath = path.join(UPLOAD_DIR, `${videoId}-${filename}`);
+          filePath = path.join(UPLOAD_DIR, `${videoId}-${filename}`);
           writeStream = fs.createWriteStream(filePath);
-          const videoMeta = {
+          videoMeta = {
             id: videoId,
             filename,
             path: filePath,
             previewPath: null,
             createdAt: new Date().toISOString(),
           };
-          videos.set(videoId, videoMeta);
-          broadcast(wsServer, 'video_uploaded', videoMeta);
-          // stub: here is where FFmpeg would generate a 10s preview and update previewPath.
         }
 
         if (chunk.data && chunk.data.length > 0) {
           writeStream.write(chunk.data);
+          hasher.update(chunk.data);
         }
 
         if (chunk.is_last) {
           if (writeStream) {
             writeStream.end();
           }
-          if (videoId) {
-            enqueueProcessingJob(videoId);
-          }
         }
       });
 
       call.on('end', () => {
-        if (queueLength > 0) queueLength -= 1;
+        try {
+          const sha256 = hasher.digest('hex');
+
+          // If duplicate, remove temp file and report
+          if (knownHashes.has(sha256)) {
+            metrics.duplicatesDetected++;
+            if (filePath && fs.existsSync(filePath)) {
+              try { fs.unlinkSync(filePath); } catch {}
+            }
+            if (queueLength > 0) queueLength -= 1;
+            broadcast(wsServer, 'video_duplicate', { filename, hash: sha256 });
+            return callback(null, { success: false, message: 'duplicate' });
+          }
+
+          // Not duplicate: record and proceed
+          if (videoMeta && videoId) {
+            videoMeta.hash = sha256;
+            videos.set(videoId, videoMeta);
+            knownHashes.set(sha256, { id: videoId, filename });
+            broadcast(wsServer, 'video_uploaded', videoMeta);
+            enqueueProcessingJob(videoId);
+          }
+        } catch (e) {
+          console.error('Error finalizing upload hash', e);
+        } finally {
+          if (queueLength > 0) queueLength -= 1;
+        }
         callback(null, { success: true, message: 'Upload received' });
       });
 
@@ -295,6 +323,7 @@ function createHttpAndWsServer() {
       videosFailed: metrics.videosFailed,
       previewGenerated: metrics.previewGenerated,
       previewFailed: metrics.previewFailed,
+      duplicatesDetected: metrics.duplicatesDetected,
     });
   });
 
